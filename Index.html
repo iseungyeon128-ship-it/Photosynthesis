@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>광합성 마스터: 미션 기반 학습</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap');
+        
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: #f8fafc;
+            overflow: hidden;
+            touch-action: none; /* 모바일에서 드래그 시 화면 스크롤 방지 */
+        }
+        
+        /* 드래그 앤 드롭을 위한 클래스 */
+        .draggable {
+            cursor: grab;
+            user-select: none;
+            touch-action: none;
+        }
+        .draggable:active {
+            cursor: grabbing;
+        }
+        .dragging-clone {
+            position: fixed;
+            pointer-events: none; /* 클론 아래의 요소를 클릭할 수 있게 함 */
+            z-index: 9999;
+            transform: translate(-50%, -50%) scale(1.2);
+            transition: transform 0.1s;
+        }
+
+        /* 둥둥 떠다니는 애니메이션 */
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        .floating { animation: float 3s ease-in-out infinite; }
+        
+        /* 획득 팝업 애니메이션 */
+        @keyframes popUp {
+            0% { transform: translateY(0) scale(1); opacity: 1; }
+            100% { transform: translateY(-50px) scale(1.5); opacity: 0; }
+        }
+        .pop-up-anim {
+            position: absolute;
+            animation: popUp 1s ease-out forwards;
+            pointer-events: none;
+            font-weight: bold;
+            text-shadow: 0 0 5px white;
+            z-index: 50;
+        }
+
+        /* 게이지바 트랜지션 */
+        .gauge-transition { transition: width 0.3s ease-out, background-color 0.3s ease; }
+    </style>
+</head>
+<body class="w-full h-screen flex flex-col items-center justify-center relative">
+
+    <!-- 로그인(학번/이름 입력) 모달 -->
+    <div id="modal-login" class="absolute inset-0 bg-slate-900/80 z-[100] flex items-center justify-center backdrop-blur-sm">
+        <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full text-center">
+            <div class="text-6xl mb-4">🌱</div>
+            <h1 class="text-3xl font-black text-green-700 mb-2">광합성 마스터</h1>
+            <p class="text-slate-600 mb-6 font-medium">환경 요인을 조절하여 포도당을 만드세요!</p>
+            
+            <div class="space-y-4 mb-8 text-left">
+                <div>
+                    <label class="block text-sm font-bold text-slate-700 mb-1">학번 (예: 10101)</label>
+                    <input type="text" id="input-student-id" class="w-full px-4 py-3 rounded-xl border-2 border-slate-200 focus:border-green-500 focus:outline-none transition-colors" placeholder="학번을 입력하세요">
+                </div>
+                <div>
+                    <label class="block text-sm font-bold text-slate-700 mb-1">이름</label>
+                    <input type="text" id="input-name" class="w-full px-4 py-3 rounded-xl border-2 border-slate-200 focus:border-green-500 focus:outline-none transition-colors" placeholder="이름을 입력하세요">
+                </div>
+            </div>
+            
+            <button id="btn-start" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-xl text-lg shadow-lg hover:shadow-xl transition-all hover:-translate-y-1">
+                게임 시작하기
+            </button>
+        </div>
+    </div>
+
+    <!-- 스테이지 클리어 안내 모달 -->
+    <div id="modal-stage-clear" class="hidden absolute inset-0 bg-white/90 z-[90] flex items-center justify-center backdrop-blur-md">
+        <div class="text-center max-w-lg p-6">
+            <div id="stage-clear-icon" class="text-8xl mb-4 animate-bounce">🎉</div>
+            <h2 id="stage-clear-title" class="text-4xl font-black text-slate-800 mb-4">미션 성공!</h2>
+            <p id="stage-clear-desc" class="text-xl text-slate-600 mb-8 font-medium leading-relaxed">
+                빛의 한계점을 확인했습니다.<br>이제 다음 미션으로 넘어갑니다.
+            </p>
+            <button id="btn-next-stage" class="px-8 py-4 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-full text-xl shadow-lg transition-all hover:scale-105">
+                다음 미션으로 ➔
+            </button>
+        </div>
+    </div>
+
+    <!-- 메인 게임 컨테이너 -->
+    <div class="w-full h-full max-w-5xl bg-white shadow-2xl relative flex flex-col overflow-hidden">
+        
+        <!-- 상단 헤더: 광합성 공식 & 미션 정보 -->
+        <div class="h-20 bg-slate-800 text-white flex items-center justify-between px-4 z-10 shadow-md">
+            <div class="flex-1">
+                <div class="text-xs text-slate-300 font-bold mb-1" id="stage-subtitle">STAGE 1: 빛의 한계점 찾기</div>
+                <div class="text-sm md:text-base font-bold text-yellow-300" id="mission-text">빛을 드래그해서 광합성량을 100%로 3초간 유지하세요.</div>
+            </div>
+            
+            <!-- 교과서 공식 -->
+            <div class="hidden md:flex flex-col items-center bg-slate-700 px-4 py-1 rounded-xl border border-slate-600">
+                <div class="text-[10px] text-slate-300 mb-1">광합성 화학 반응식</div>
+                <div class="text-sm font-bold flex items-center gap-2">
+                    <span class="text-blue-300">물💧</span> + <span class="text-gray-300">이산화탄소☁️</span>
+                    <span class="text-yellow-400 text-xs">➔(빛☀️)➔</span>
+                    <span class="text-green-300">포도당🍬</span> + <span class="text-cyan-300">산소🫧</span>
+                </div>
+            </div>
+
+            <div class="flex-1 text-right">
+                <div class="text-sm text-slate-300 font-bold">남은 시간</div>
+                <div class="text-2xl font-black text-red-400" id="ui-timer">∞</div>
+            </div>
+        </div>
+
+        <!-- 중앙 게임 영역 -->
+        <div class="flex-1 flex flex-row relative bg-gradient-to-b from-blue-50 to-green-50">
+            
+            <!-- 왼쪽: 자원 드래그 패널 -->
+            <div class="w-24 md:w-32 bg-white/80 backdrop-blur border-r border-slate-200 flex flex-col items-center py-4 gap-6 z-20 shadow-lg">
+                <div class="text-xs font-bold text-slate-500 mb-2">드래그해서<br>공급하세요</div>
+                
+                <div class="resource-item draggable flex flex-col items-center" data-type="light">
+                    <div class="w-14 h-14 bg-yellow-100 rounded-full flex items-center justify-center text-3xl shadow-sm border-2 border-yellow-300 hover:scale-110 transition-transform">☀️</div>
+                    <span class="text-xs font-bold mt-1 text-yellow-600">빛</span>
+                </div>
+                
+                <div class="resource-item draggable flex flex-col items-center" data-type="water">
+                    <div class="w-14 h-14 bg-blue-100 rounded-full flex items-center justify-center text-3xl shadow-sm border-2 border-blue-300 hover:scale-110 transition-transform">💧</div>
+                    <span class="text-xs font-bold mt-1 text-blue-600">물</span>
+                </div>
+                
+                <div class="resource-item draggable flex flex-col items-center" data-type="co2">
+                    <div class="w-14 h-14 bg-gray-100 rounded-full flex items-center justify-center text-3xl shadow-sm border-2 border-gray-300 hover:scale-110 transition-transform">☁️</div>
+                    <span class="text-xs font-bold mt-1 text-gray-600">이산화탄소</span>
+                </div>
+                
+                <div class="resource-item draggable flex flex-col items-center" data-type="temp">
+                    <div class="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center text-3xl shadow-sm border-2 border-red-300 hover:scale-110 transition-transform">🔥</div>
+                    <span class="text-xs font-bold mt-1 text-red-600">온도(열)</span>
+                </div>
+            </div>
+
+            <!-- 중앙: 식물 및 현재 상태 -->
+            <div class="flex-1 relative flex flex-col items-center justify-end pb-8" id="plant-dropzone">
+                <!-- 환경 상태 표시기 -->
+                <div class="absolute top-4 left-4 flex gap-3 z-10">
+                    <div class="bg-white/90 px-3 py-1 rounded-lg shadow-sm border border-slate-200 text-sm font-bold flex gap-2">
+                        <span>☀️ <span id="val-light" class="text-yellow-600">0</span>%</span>
+                        <span>💧 <span id="val-water" class="text-blue-600">0</span>%</span>
+                        <span>☁️ <span id="val-co2" class="text-gray-600">0</span>%</span>
+                        <span>🌡️ <span id="val-temp" class="text-red-600">20</span>°C</span>
+                    </div>
+                </div>
+
+                <!-- 피드백 메시지 -->
+                <div class="absolute top-16 z-20 text-center pointer-events-none w-full flex justify-center">
+                    <div id="feedback-msg" class="inline-block bg-slate-800 text-white px-4 py-2 rounded-2xl shadow-lg font-medium max-w-sm transition-all duration-300">
+                        안내 메시지가 여기에 표시됩니다.
+                    </div>
+                </div>
+
+                <!-- 획득한 포도당 표시 -->
+                <div class="absolute top-4 right-4 bg-white/90 p-3 rounded-2xl shadow-md border-2 border-green-200 flex flex-col items-center min-w-[100px] z-10">
+                    <div class="text-xs font-bold text-slate-500 mb-1">저장된 포도당</div>
+                    <div class="text-3xl font-black text-green-600 flex items-center">
+                        🍬 <span id="ui-glucose" class="ml-1">0</span>
+                    </div>
+                </div>
+
+                <!-- 식물 시각화 -->
+                <div id="plant-avatar" class="text-9xl floating z-10 transition-all duration-500 drop-shadow-2xl">🌱</div>
+                
+                <!-- 흙 배경 -->
+                <div class="absolute bottom-4 w-48 h-12 bg-amber-900 rounded-[100%] blur-[2px] z-0 shadow-[0_10px_20px_rgba(0,0,0,0.5)]"></div>
+            </div>
+
+            <!-- 오른쪽: 분석 패널 (그래프) -->
+            <div class="w-64 bg-slate-50 border-l border-slate-200 flex flex-col p-4 shadow-inner z-20">
+                <h3 class="font-black text-slate-700 mb-4 border-b pb-2 flex items-center">
+                    <span class="text-xl mr-2">📊</span> 실시간 데이터
+                </h3>
+
+                <!-- 광합성량 게이지 -->
+                <div class="mb-6">
+                    <div class="flex justify-between text-sm font-bold mb-1">
+                        <span class="text-slate-600">현재 광합성량</span>
+                        <span id="ui-rate" class="text-green-600 text-lg">0%</span>
+                    </div>
+                    <div class="w-full bg-slate-200 rounded-full h-4 overflow-hidden relative shadow-inner">
+                        <div id="bar-rate" class="h-full gauge-transition bg-slate-400 w-0"></div>
+                    </div>
+                </div>
+
+                <!-- 캔버스 그래프 영역 -->
+                <div class="flex-1 bg-white rounded-xl border border-slate-200 p-2 shadow-sm flex flex-col relative">
+                    <div class="text-xs font-bold text-slate-500 text-center mb-1" id="graph-title">광합성량 변화 그래프</div>
+                    <canvas id="graph-canvas" class="w-full flex-1"></canvas>
+                    
+                    <!-- 캔버스 위에 오버레이되는 교과서 이론 그래프 아이콘 가이드 -->
+                    <div id="graph-guide" class="absolute bottom-2 right-2 opacity-30 pointer-events-none hidden">
+                        <img id="graph-guide-img" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='30' viewBox='0 0 40 30'><path d='M5,25 Q15,5 35,5' fill='none' stroke='red' stroke-width='2'/><path d='M5,5 L5,25 L35,25' fill='none' stroke='black' stroke-width='1'/></svg>" class="w-12 h-8">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 게임 종료 & 리더보드 모달 -->
+    <div id="modal-gameover" class="hidden absolute inset-0 bg-slate-900/90 z-[100] flex items-center justify-center backdrop-blur-sm">
+        <div class="bg-white p-8 rounded-3xl shadow-2xl max-w-3xl w-full flex flex-col md:flex-row gap-8">
+            
+            <!-- 내 결과 -->
+            <div class="flex-1 text-center border-r-0 md:border-r border-slate-200 pr-0 md:pr-8 flex flex-col justify-center">
+                <div class="text-6xl mb-4">🏆</div>
+                <h2 class="text-3xl font-black text-slate-800 mb-2">실험 완료!</h2>
+                <p class="text-slate-600 font-medium mb-6">최종 생산한 포도당 개수</p>
+                
+                <div class="text-6xl font-black text-green-500 mb-8 flex items-center justify-center">
+                    🍬 <span id="final-score" class="ml-2">0</span>
+                </div>
+                
+                <button onclick="location.reload()" class="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-xl shadow transition-colors">
+                    처음부터 다시하기
+                </button>
+            </div>
+
+            <!-- 명예의 전당 (리더보드) -->
+            <div class="flex-1 flex flex-col max-h-[400px]">
+                <h3 class="text-xl font-black text-slate-800 mb-4 flex items-center">
+                    <span class="text-yellow-500 mr-2">👑</span> 명예의 전당 (TOP 5)
+                </h3>
+                <div id="leaderboard-list" class="flex-1 overflow-y-auto space-y-3 pr-2">
+                    <!-- 리더보드 아이템이 여기에 동적으로 추가됨 -->
+                    <div class="text-center text-slate-400 py-10">데이터를 불러오는 중...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // 🔥 Firebase 설정 🔥
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'my-photosynthesis-game';
+        
+        let firebaseConfig = {};
+        if (typeof __firebase_config !== 'undefined') {
+            firebaseConfig = JSON.parse(__firebase_config);
+        } else {
+            // ⭐ 깃허브 배포 시 본인의 설정으로 변경하세요 ⭐
+            firebaseConfig = {
+                apiKey: "YOUR_API_KEY",
+                authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+                projectId: "YOUR_PROJECT_ID",
+                storageBucket: "YOUR_PROJECT_ID.appspot.com",
+                messagingSenderId: "YOUR_SENDER_ID",
+                appId: "YOUR_APP_ID"
+            };
+        }
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        let user = null;
+        let userId = null;
+
+        // 게임 상태 관리
+        let playerInfo = { id: "", name: "" };
+        let currentStage = 0;
+        let env = { light: 0, water: 0, co2: 0, temp: 20 };
+        let targetEnv = { light: 0, water: 0, co2: 0, temp: 20 }; // 부드러운 전환을 위한 목표값
+        let ratePercent = 0;
+        let glucoseCount = 0;
+        
+        let timeLeft = 0;
+        let gameLoopId = null;
+        let stageClearTimer = 0; // 스테이지 1 클리어 조건 (3초 유지) 확인용
+        
+        // 그래프 데이터 저장용
+        let rateHistory = [];
+        let tickCounter = 0;
+
+        // DOM 요소
+        const elFeedback = document.getElementById('feedback-msg');
+        const elPlant = document.getElementById('plant-avatar');
+        const dropZone = document.getElementById('plant-dropzone');
+        const graphCanvas = document.getElementById('graph-canvas');
+        const graphCtx = graphCanvas.getContext('2d');
+
+        let activeClone = null;
+        let currentDragType = null;
+
+        document.querySelectorAll('.resource-item').forEach(item => {
+            item.addEventListener('pointerdown', startDrag);
+        });
+
+        function startDrag(e) {
+            e.preventDefault();
+            // 스테이지별 허용된 아이템만 드래그 가능하도록 제어
+            const type = e.currentTarget.dataset.type;
+            if (currentStage === 1 && type !== 'light') {
+                showFeedback("이번 미션에서는 '빛'만 조절해 보세요!", "bg-slate-700");
+                return;
+            }
+            if (currentStage === 2 && type !== 'temp') {
+                showFeedback("이번 미션에서는 '온도(열)'만 조절해 보세요!", "bg-slate-700");
+                return;
+            }
+
+            currentDragType = type;
+            
+            // 클론 생성
+            activeClone = e.currentTarget.cloneNode(true);
+            activeClone.classList.remove('draggable');
+            activeClone.classList.add('dragging-clone');
+            document.body.appendChild(activeClone);
+            
+            moveClone(e);
+
+            document.addEventListener('pointermove', onDrag);
+            document.addEventListener('pointerup', endDrag);
+        }
+
+        function onDrag(e) {
+            if (!activeClone) return;
+            moveClone(e);
+        }
+
+        function moveClone(e) {
+            activeClone.style.left = e.clientX + 'px';
+            activeClone.style.top = e.clientY + 'px';
+        }
+
+        function endDrag(e) {
+            document.removeEventListener('pointermove', onDrag);
+            document.removeEventListener('pointerup', endDrag);
+            
+            if (!activeClone) return;
+
+            // 드롭 위치가 식물 영역(dropZone) 내부인지 확인
+            const rect = dropZone.getBoundingClientRect();
+            if (e.clientX >= rect.left && e.clientX <= rect.right &&
+                e.clientY >= rect.top && e.clientY <= rect.bottom) {
+                
+                applyResource(currentDragType, e.clientX, e.clientY);
+            }
+            
+            activeClone.remove();
+            activeClone = null;
+            currentDragType = null;
+        }
+
+        function applyResource(type, x, y) {
+            // 이펙트 팝업 텍스트 생성
+            const popText = document.createElement('div');
+            popText.className = 'pop-up-anim';
+            popText.style.left = (x - dropZone.getBoundingClientRect().left) + 'px';
+            popText.style.top = (y - dropZone.getBoundingClientRect().top) + 'px';
+            
+            let amount = 0;
+            if (type === 'light') { popText.innerText = '+☀️'; popText.style.color = '#eab308'; amount = 20; }
+            if (type === 'water') { popText.innerText = '+💧'; popText.style.color = '#3b82f6'; amount = 20; }
+            if (type === 'co2') { popText.innerText = '+☁️'; popText.style.color = '#4b5563'; amount = 20; }
+            if (type === 'temp') { popText.innerText = '+🔥'; popText.style.color = '#ef4444'; amount = 10; } // 온도를 10씩 팍팍 올려서 40도를 넘기기 쉽게 수정
+            
+            dropZone.appendChild(popText);
+            setTimeout(() => popText.remove(), 1000);
+
+            // 실제 수치 증가
+            targetEnv[type] += amount;
+            if (targetEnv[type] > 100 && type !== 'temp') targetEnv[type] = 100;
+            if (targetEnv[type] > 60 && type === 'temp') targetEnv[type] = 60; // 온도는 60도까지만
+        }
+
+        async function initAuth() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined') {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                user = auth.currentUser;
+                userId = user.uid;
+            } catch (error) {
+                console.error("Auth error:", error);
+            }
+        }
+
+        document.getElementById('btn-start').addEventListener('click', () => {
+            const sid = document.getElementById('input-student-id').value.trim();
+            const sname = document.getElementById('input-name').value.trim();
+            if(!sid || !sname) {
+                alert('학번과 이름을 입력해주세요.');
+                return;
+            }
+            playerInfo = { id: sid, name: sname };
+            document.getElementById('modal-login').classList.add('hidden');
+            
+            // 캔버스 사이즈 초기화
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
+            
+            startStage(1);
+        });
+
+        function resizeCanvas() {
+            const rect = graphCanvas.parentElement.getBoundingClientRect();
+            graphCanvas.width = rect.width;
+            graphCanvas.height = rect.height - 30; // 제목 영역 제외
+            drawChart();
+        }
+
+        document.getElementById('btn-next-stage').addEventListener('click', () => {
+            document.getElementById('modal-stage-clear').classList.add('hidden');
+            startStage(currentStage + 1);
+        });
+
+        function showFeedback(msg, bgColorClass = "bg-slate-800") {
+            elFeedback.innerText = msg;
+            elFeedback.className = `inline-block text-white px-5 py-3 rounded-2xl shadow-lg font-bold max-w-sm transition-all duration-300 scale-100 ${bgColorClass}`;
+        }
+
+        function startStage(stageNum) {
+            currentStage = stageNum;
+            rateHistory = [];
+            tickCounter = 0;
+            stageClearTimer = 0;
+            
+            if (gameLoopId) cancelAnimationFrame(gameLoopId);
+
+            document.getElementById('graph-guide').classList.remove('hidden');
+
+            if (stageNum === 1) {
+                // 빛의 한계점 (포화점) 미션
+                document.getElementById('stage-subtitle').innerText = "STAGE 1: 빛과 광합성량의 관계";
+                document.getElementById('mission-text').innerText = "☀️빛을 공급하여 광합성량을 100%로 3초간 유지하세요. (나머지 환경은 완벽함)";
+                document.getElementById('ui-timer').innerText = "∞";
+                
+                // 빛 외의 환경은 최적으로 고정 (온도를 최고 효율인 35도로 수정)
+                env = { light: 0, water: 100, co2: 100, temp: 35 };
+                targetEnv = { ...env };
+                
+                // 가이드 이미지 (포화 곡선)
+                document.getElementById('graph-guide-img').src = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='30' viewBox='0 0 40 30'><path d='M5,25 Q15,5 35,5' fill='none' stroke='red' stroke-width='2'/><path d='M5,5 L5,25 L35,25' fill='none' stroke='black' stroke-width='1'/></svg>";
+                
+                showFeedback("왼쪽의 ☀️아이콘을 식물로 드래그하세요!", "bg-blue-600");
+
+            } else if (stageNum === 2) {
+                // 온도 최적점 및 변성 미션
+                document.getElementById('stage-subtitle').innerText = "STAGE 2: 온도와 광합성량의 관계";
+                document.getElementById('mission-text').innerText = "🔥열을 가해 35도(최고)를 찍은 뒤, 계속 열을 가해 40도를 넘겨 효소를 파괴해보세요!";
+                document.getElementById('ui-timer').innerText = "∞";
+                
+                // 온도 외 환경 최적 고정. 온도는 20도부터 시작
+                env = { light: 100, water: 100, co2: 100, temp: 20 };
+                targetEnv = { ...env };
+
+                // 가이드 이미지 (산 모양 곡선)
+                document.getElementById('graph-guide-img').src = "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='40' height='30' viewBox='0 0 40 30'><path d='M5,25 Q20,25 30,5 L35,25' fill='none' stroke='red' stroke-width='2'/><path d='M5,5 L5,25 L35,25' fill='none' stroke='black' stroke-width='1'/></svg>";
+                
+                showFeedback("🔥아이콘을 드래그해서 온도를 높여보세요.", "bg-blue-600");
+
+            } else if (stageNum === 3) {
+                // 실전 모드
+                document.getElementById('stage-subtitle').innerText = "STAGE 3: 실전 생존 (1분)";
+                document.getElementById('mission-text').innerText = "모든 요인을 골고루 조절하여 포도당을 최대한 많이 모으세요!";
+                timeLeft = 60;
+                document.getElementById('ui-timer').innerText = timeLeft;
+                glucoseCount = 0;
+                document.getElementById('ui-glucose').innerText = glucoseCount;
+                
+                // 모든 환경 0부터 시작 (온도는 실온)
+                env = { light: 0, water: 0, co2: 0, temp: 20 };
+                targetEnv = { ...env };
+
+                document.getElementById('graph-guide').classList.add('hidden'); // 실전은 가이드 없음
+                showFeedback("게임 시작! 지속적으로 수치가 떨어집니다. 보충해주세요!", "bg-red-600");
+                
+                // 1초 타이머 시작
+                const timerInterval = setInterval(() => {
+                    timeLeft--;
+                    document.getElementById('ui-timer').innerText = timeLeft;
+                    if(timeLeft <= 0) {
+                        clearInterval(timerInterval);
+                        endGame();
+                    }
+                }, 1000);
+            }
+
+            gameLoop();
+        }
+
+        let lastTime = 0;
+        function gameLoop(timestamp) {
+            if (!gameLoopId) lastTime = timestamp;
+            const dt = timestamp - lastTime || 0;
+            lastTime = timestamp;
+
+            // 부드러운 수치 전환 (lerp)
+            env.light += (targetEnv.light - env.light) * 0.1;
+            env.water += (targetEnv.water - env.water) * 0.1;
+            env.co2 += (targetEnv.co2 - env.co2) * 0.1;
+            env.temp += (targetEnv.temp - env.temp) * 0.1;
+
+            // 스테이지 3: 지속적인 자원 소모 (온도는 20도로 회귀)
+            if (currentStage === 3 && dt > 0) {
+                const decay = dt * 0.005; // 초당 5씩 감소
+                targetEnv.light = Math.max(0, targetEnv.light - decay);
+                targetEnv.water = Math.max(0, targetEnv.water - decay);
+                targetEnv.co2 = Math.max(0, targetEnv.co2 - decay);
+                if (targetEnv.temp > 20) targetEnv.temp -= decay * 0.2;
+                if (targetEnv.temp < 20) targetEnv.temp += decay * 0.2;
+            }
+
+            // UI 텍스트 업데이트
+            document.getElementById('val-light').innerText = Math.round(env.light);
+            document.getElementById('val-water').innerText = Math.round(env.water);
+            document.getElementById('val-co2').innerText = Math.round(env.co2);
+            document.getElementById('val-temp').innerText = Math.round(env.temp);
+
+            calculateRate();
+            drawChart();
+            checkMissionClear(dt);
+
+            if (currentStage <= 3) {
+                gameLoopId = requestAnimationFrame(gameLoop);
+            }
+        }
+
+        function calculateRate() {
+            // 1. 빛 효율 (60 이상이면 100% 포화) - 교과서 원리
+            let effLight = env.light >= 60 ? 100 : (env.light / 60) * 100;
+            
+            // 2. 이산화탄소 효율 (60 이상이면 100% 포화)
+            let effCo2 = env.co2 >= 60 ? 100 : (env.co2 / 60) * 100;
+            
+            // 3. 물 효율 (단순 선형 비례)
+            let effWater = env.water;
+
+            // 4. 온도 효율 (교과서 핵심: 35도 최고, 40도 이상 파괴)
+            let effTemp = 0;
+            if (env.temp <= 35) {
+                effTemp = (env.temp / 35) * 100; // 0~35도까지 선형 증가
+            } else if (env.temp <= 40) {
+                effTemp = 100 - ((env.temp - 35) / 5) * 100; // 35~40도 구간 급락
+            } else {
+                effTemp = 0; // 40도 초과 시 단백질(효소) 파괴로 0
+            }
+
+            // 최소량의 법칙 (Liebig's Law)
+            let finalRate = Math.min(effLight, effCo2, effWater, effTemp);
+            
+            // 극단적인 온도 파괴 우선 적용
+            if (env.temp >= 40) finalRate = 0;
+
+            ratePercent = finalRate;
+
+            // UI 업데이트
+            const bar = document.getElementById('bar-rate');
+            bar.style.width = ratePercent + '%';
+            document.getElementById('ui-rate').innerText = Math.round(ratePercent) + '%';
+            
+            // 색상 변화
+            if (ratePercent > 80) bar.className = "h-full gauge-transition bg-green-500 w-0";
+            else if (ratePercent > 40) bar.className = "h-full gauge-transition bg-yellow-400 w-0";
+            else bar.className = "h-full gauge-transition bg-red-500 w-0";
+
+            // 식물 외형 변화 (시들기 등)
+            if (env.temp >= 40) {
+                elPlant.innerText = '🥀';
+                elPlant.style.filter = 'grayscale(100%)';
+            } else if (ratePercent > 80) {
+                elPlant.innerText = '🌻';
+                elPlant.style.filter = 'none';
+            } else if (ratePercent > 30) {
+                elPlant.innerText = '🌿';
+                elPlant.style.filter = 'none';
+            } else {
+                elPlant.innerText = '🌱';
+                elPlant.style.filter = 'none';
+            }
+
+            // 데이터 기록 (1초에 약 2번 기록 - stage 3용)
+            tickCounter++;
+            if (currentStage === 3 && tickCounter % 30 === 0) {
+                rateHistory.push(ratePercent);
+            }
+
+            // 포도당 및 산소 생산 (스테이지 3 한정)
+            if (currentStage === 3 && ratePercent > 0 && tickCounter % 10 === 0) {
+                glucoseCount += (ratePercent * 0.05); // 효율에 비례하여 생산
+                document.getElementById('ui-glucose').innerText = Math.floor(glucoseCount);
+                
+                // 산소 방울 이펙트 랜덤
+                if (Math.random() < 0.3) {
+                    createOxygenBubble();
+                }
+            }
+        }
+
+        function createOxygenBubble() {
+            const bubble = document.createElement('div');
+            bubble.innerText = '🫧';
+            bubble.className = 'absolute text-xl pointer-events-none';
+            bubble.style.left = (Math.random() * 80 + 10) + '%';
+            bubble.style.bottom = '50px';
+            bubble.style.animation = 'popUp 2s ease-in forwards';
+            dropZone.appendChild(bubble);
+            setTimeout(() => bubble.remove(), 2000);
+        }
+
+        function drawChart() {
+            if (!graphCtx) return;
+            const width = graphCanvas.width;
+            const height = graphCanvas.height;
+            
+            graphCtx.clearRect(0, 0, width, height);
+            
+            // 배경 축 그리기
+            graphCtx.strokeStyle = "#e2e8f0";
+            graphCtx.lineWidth = 1;
+            graphCtx.beginPath();
+            graphCtx.moveTo(0, height); graphCtx.lineTo(width, height); // X축
+            graphCtx.moveTo(0, 0); graphCtx.lineTo(0, height); // Y축
+            graphCtx.stroke();
+
+            if (currentStage === 1 || currentStage === 2) {
+                // 미션 1, 2: 이론적 그래프 배경 + 현재 위치 점 찍기
+                graphCtx.beginPath();
+                graphCtx.strokeStyle = "rgba(100, 100, 100, 0.3)";
+                graphCtx.lineWidth = 3;
+                graphCtx.setLineDash([5, 5]); // 점선
+                
+                for (let x = 0; x <= 100; x += 2) {
+                    let y = 0;
+                    if (currentStage === 1) {
+                        // 빛 그래프
+                        y = Math.min(100, x * (100 / 60));
+                    } else if (currentStage === 2) {
+                        // 온도 그래프 (x를 0~50도로 스케일링)
+                        let t = x / 2;
+                        if (t <= 35) y = (t / 35) * 100;
+                        else if (t <= 40) y = Math.max(0, 100 - ((t - 35) / 5) * 100);
+                        else y = 0;
+                    }
+                    
+                    const cx = (x / 100) * width;
+                    const cy = height - (y / 100) * height;
+                    if (x === 0) graphCtx.moveTo(cx, cy);
+                    else graphCtx.lineTo(cx, cy);
+                }
+                graphCtx.stroke();
+                graphCtx.setLineDash([]); // 복구
+
+                // 현재 상태 빨간 점
+                let currentX = currentStage === 1 ? env.light : (env.temp / 50) * 100;
+                let cx = (currentX / 100) * width;
+                let cy = height - (ratePercent / 100) * height;
+
+                graphCtx.beginPath();
+                graphCtx.arc(cx, cy, 6, 0, Math.PI * 2);
+                graphCtx.fillStyle = "red";
+                graphCtx.fill();
+                graphCtx.strokeStyle = "white";
+                graphCtx.lineWidth = 2;
+                graphCtx.stroke();
+
+                // 라벨
+                graphCtx.fillStyle = "#64748b";
+                graphCtx.font = "10px sans-serif";
+                graphCtx.fillText(currentStage === 1 ? "빛 세기 증가 ➔" : "온도 증가 ➔", width - 80, height - 5);
+
+            } else if (currentStage === 3) {
+                // 실전 모드: 실시간 선 그래프
+                if (rateHistory.length === 0) return;
+                
+                graphCtx.beginPath();
+                graphCtx.strokeStyle = "#22c55e";
+                graphCtx.lineWidth = 2;
+                
+                // 최대 120개 데이터 포인트(60초) 기준 X축 스텝
+                const stepX = width / 120; 
+                
+                for(let i=0; i<rateHistory.length; i++) {
+                    const x = i * stepX;
+                    const y = height - (rateHistory[i] / 100) * height;
+                    if (i === 0) graphCtx.moveTo(x, y);
+                    else graphCtx.lineTo(x, y);
+                }
+                graphCtx.stroke();
+            }
+        }
+
+        function checkMissionClear(dt) {
+            if (currentStage === 1) {
+                // 소수점 오차 방지를 위해 Math.round 처리
+                if (Math.round(env.light) >= 60 && Math.round(ratePercent) >= 99) {
+                    stageClearTimer += dt;
+                    showFeedback(`유지하세요! (${(stageClearTimer/1000).toFixed(1)}초/3초)`, "bg-green-600");
+                    if (stageClearTimer >= 3000) {
+                        cancelAnimationFrame(gameLoopId); gameLoopId = null;
+                        document.getElementById('stage-clear-desc').innerHTML = "빛의 세기가 증가해도 어느 순간부터<br>더 이상 광합성량이 늘어나지 않는 <b>'한계점'</b>을 확인했습니다!";
+                        document.getElementById('modal-stage-clear').classList.remove('hidden');
+                    }
+                } else {
+                    stageClearTimer = 0;
+                    if (env.light > 0) showFeedback("빛을 더 공급해서 100%를 만드세요!", "bg-slate-700");
+                }
+            } 
+            else if (currentStage === 2) {
+                if (env.temp > 25 && env.temp <= 35) {
+                    showFeedback("온도가 올라가며 광합성량이 급증합니다! 더 올려보세요.", "bg-yellow-600");
+                } else if (env.temp > 35 && env.temp < 39.5) {
+                    showFeedback("효율이 떨어지기 시작합니다! 계속 올려보세요.", "bg-orange-600");
+                } else if (Math.round(env.temp) >= 40) { // 소수점 오차 방지
+                    cancelAnimationFrame(gameLoopId); gameLoopId = null;
+                    showFeedback("효소가 파괴되었습니다!", "bg-red-600");
+                    document.getElementById('stage-clear-desc').innerHTML = "온도가 40도를 넘자 <b>단백질(효소)이 파괴</b>되어<br>광합성이 완전히 멈추는 것을 확인했습니다!";
+                    document.getElementById('modal-stage-clear').classList.remove('hidden');
+                }
+            }
+        }
+
+        async function endGame() {
+            cancelAnimationFrame(gameLoopId);
+            gameLoopId = null;
+            
+            const finalScore = Math.floor(glucoseCount);
+            document.getElementById('final-score').innerText = finalScore;
+            document.getElementById('modal-gameover').classList.remove('hidden');
+
+            // 파이어베이스 점수 기록 및 불러오기
+            try {
+                if (user && finalScore > 0) {
+                    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'scores'), {
+                        studentId: playerInfo.id,
+                        name: playerInfo.name,
+                        score: finalScore,
+                        timestamp: Date.now()
+                    });
+                }
+                await loadLeaderboard();
+            } catch(e) {
+                console.error(e);
+                document.getElementById('leaderboard-list').innerHTML = "<div class='text-red-500'>순위표를 불러올 수 없습니다.</div>";
+            }
+        }
+
+        async function loadLeaderboard() {
+            const listEl = document.getElementById('leaderboard-list');
+            try {
+                // Rule 1, 2 적용: 단순 쿼리 후 JS에서 정렬
+                const q = collection(db, 'artifacts', appId, 'public', 'data', 'scores');
+                const querySnapshot = await getDocs(q);
+                
+                let scores = [];
+                querySnapshot.forEach((doc) => {
+                    scores.push(doc.data());
+                });
+
+                // 점수 내림차순 정렬
+                scores.sort((a, b) => b.score - a.score);
+                
+                // Top 5 자르기
+                scores = scores.slice(0, 5);
+
+                listEl.innerHTML = '';
+                if(scores.length === 0) {
+                    listEl.innerHTML = "<div class='text-slate-400 text-center py-4'>아직 등록된 기록이 없습니다.</div>";
+                    return;
+                }
+
+                scores.forEach((data, index) => {
+                    const item = document.createElement('div');
+                    item.className = "bg-slate-50 p-3 rounded-xl border border-slate-200 flex justify-between items-center";
+                    let rankBadge = `${index + 1}위`;
+                    if(index === 0) rankBadge = "🥇 1위";
+                    if(index === 1) rankBadge = "🥈 2위";
+                    if(index === 2) rankBadge = "🥉 3위";
+
+                    item.innerHTML = `
+                        <div class="flex items-center gap-3">
+                            <span class="font-black text-slate-500 w-12">${rankBadge}</span>
+                            <div class="flex flex-col text-left">
+                                <span class="font-bold text-slate-800">${data.studentId} ${data.name}</span>
+                            </div>
+                        </div>
+                        <div class="font-black text-green-600 text-xl">${data.score}🍬</div>
+                    `;
+                    listEl.appendChild(item);
+                });
+            } catch(e) {
+                console.error(e);
+                listEl.innerHTML = "<div class='text-red-500 text-sm'>데이터 오류. Firebase 규칙(Rule 1,2,3)을 확인하세요.</div>";
+            }
+        }
+
+        // 초기화
+        window.onload = () => {
+            initAuth();
+        };
+    </script>
+</body>
+</html>
